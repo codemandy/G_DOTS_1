@@ -147,6 +147,8 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 	                    choices=["floyd-steinberg", "blue-noise", "ordered", "white-noise"],
 	                    help="Dithering algorithm: floyd-steinberg (default), blue-noise (stochastic), ordered (Bayer), white-noise (random)")
 	parser.add_argument("--variable-dots", action="store_true", help="Enable variable dot sizes based on local tone (darker = larger)")
+	parser.add_argument("--opacity-min", type=float, default=0.15, help="Minimum opacity for dots (0-1, default 0.15)")
+	parser.add_argument("--opacity-max", type=float, default=0.85, help="Maximum opacity for dots (0-1, default 0.85)")
 	parser.add_argument("--order", choices=["none", "nearest"], default="nearest", help="Point visiting order for travel minimization")
 	args = parser.parse_args(argv)
 
@@ -190,6 +192,8 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 		height_mm=height_mm,
 		order=args.order,
 		output_path=args.output,
+		opacity_min=args.opacity_min,
+		opacity_max=args.opacity_max,
 	)
 	total_dots = sum(len(p) for _, _, p, _ in layers)
 	print(f"Wrote {args.output}  ({cols}x{rows} grid, {total_dots} dots, method={args.dither_method}, variable_dots={args.variable_dots})")

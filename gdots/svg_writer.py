@@ -43,6 +43,8 @@ def write_svg_circles(
 	height_mm: float,
 	order: str,
 	output_path: str,
+	opacity_min: float = 0.15,
+	opacity_max: float = 0.85,
 ) -> None:
 	# Build SVG string with proper layer groups
 	# Points can be (x, y, scale) tuples where scale modulates the radius
@@ -66,15 +68,19 @@ def write_svg_circles(
 		else:
 			ordered = list(points)
 		
-		stroke = _hex_color_to_svg(color_hex)
+		fill_color = _hex_color_to_svg(color_hex)
 		for point in ordered:
 			x, y, scale = point  # Unpack 3-tuple
 			# Variable radius based on scale factor
 			radius = base_radius * scale
-			stroke_width = radius / 4.0
-			# Circles as stroked outlines (no fill) for pen plotters
+			# Filled circles with opacity for watercolor blending
+			# Scale represents density: higher scale = more opaque (darker areas)
+			# Map scale (0.5-1.5) to opacity range (opacity_min to opacity_max)
+			normalized_scale = (scale - 0.5) / 1.0  # 0.5->0, 1.5->1
+			opacity = opacity_min + normalized_scale * (opacity_max - opacity_min)
+			opacity = max(0.05, min(1.0, opacity))
 			parts.append(
-				f'    <circle cx="{x:.4f}" cy="{y:.4f}" r="{radius:.4f}" fill="none" stroke="{stroke}" stroke-width="{stroke_width:.4f}" />\n'
+				f'    <circle cx="{x:.4f}" cy="{y:.4f}" r="{radius:.4f}" fill="{fill_color}" fill-opacity="{opacity:.3f}" stroke="none" />\n'
 			)
 		parts.append("  </g>\n")
 	
