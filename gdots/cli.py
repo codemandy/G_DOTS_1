@@ -5,7 +5,7 @@ from typing import List, Optional, Sequence, Tuple
 import numpy as np
 from PIL import Image
 
-from .dither import floyd_steinberg_dither
+from .dither import dither, compute_local_density
 from .svg_writer import write_svg_circles
 
 
@@ -108,9 +108,11 @@ def _compute_color_contribution(rgb: np.ndarray, target_color: Tuple[int, int, i
 	return np.clip(contribution, 0, 255).astype(np.uint8)
 
 
-def _extract_points_from_mask(mask_bw: np.ndarray, step_mm: float) -> List[Tuple[float, float]]:
+def _extract_points_from_mask(mask_bw: np.ndarray, step_mm: float, density: Optional[np.ndarray] = None) -> List[Tuple[float, float, float]]:
 	# mask_bw: bool or {0,1} shape (H,W)
-	points: List[Tuple[float, float]] = []
+	# density: optional float32 (H,W) with 0-1 values for variable sizing
+	# Returns list of (x_mm, y_mm, radius_scale) where radius_scale is 0.5-1.5
+	points: List[Tuple[float, float, float]] = []
 	rows, cols = mask_bw.shape
 	# Place points on grid centers
 	for y in range(rows):
@@ -118,7 +120,14 @@ def _extract_points_from_mask(mask_bw: np.ndarray, step_mm: float) -> List[Tuple
 			if mask_bw[y, x]:
 				px = (x + 0.5) * step_mm
 				py = (y + 0.5) * step_mm
-				points.append((px, py))
+				# Variable dot size based on local density
+				if density is not None:
+					# Scale radius from 0.5x to 1.5x based on darkness
+					# Darker areas = larger dots
+					scale = 0.5 + density[y, x] * 1.0
+				else:
+					scale = 1.0
+				points.append((px, py, scale))
 	return points
 
 
@@ -134,6 +143,10 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 	parser.add_argument("--mode", choices=["grayscale", "palette"], default="grayscale", help="Dithering mode")
 	parser.add_argument("--threshold", type=float, default=0.5, help="Color threshold 0-1 (higher = more selective colors, palette mode only)")
 	parser.add_argument("--white-threshold", type=float, default=0.85, help="White preservation 0-1 (higher = preserve only brightest whites, palette mode only)")
+	parser.add_argument("--dither-method", type=str, default="floyd-steinberg", 
+	                    choices=["floyd-steinberg", "blue-noise", "ordered", "white-noise"],
+	                    help="Dithering algorithm: floyd-steinberg (default), blue-noise (stochastic), ordered (Bayer), white-noise (random)")
+	parser.add_argument("--variable-dots", action="store_true", help="Enable variable dot sizes based on local tone (darker = larger)")
 	parser.add_argument("--order", choices=["none", "nearest"], default="nearest", help="Point visiting order for travel minimization")
 	args = parser.parse_args(argv)
 
@@ -146,11 +159,14 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 	)
 	dot_mm = args.dot_mm if args.dot_mm and args.dot_mm > 0 else max(0.1, 0.8 * args.step_mm)
 
-	layers: List[Tuple[str, str, List[Tuple[float, float]], float]] = []  # (layer_name, hex, points, radius)
+	layers: List[Tuple[str, str, List[Tuple[float, float, float]], float]] = []  # (layer_name, hex, points_with_scale, base_radius)
 	if args.mode == "grayscale":
 		gray = _to_grayscale_luma(rgb)
-		mask = floyd_steinberg_dither(gray) > 0
-		points = _extract_points_from_mask(mask, args.step_mm)
+		# Compute density map if variable dots enabled
+		density = compute_local_density(gray, kernel_size=5) if args.variable_dots else None
+		# Apply selected dithering method
+		mask = dither(gray, method=args.dither_method) > 0
+		points = _extract_points_from_mask(mask, args.step_mm, density=density)
 		layers.append(("black", palette_hex[0], points, 0.5 * dot_mm))
 	else:
 		# Overlapping color layers: each color gets its own dithered contribution
@@ -158,9 +174,11 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 			target_rgb = _hex_to_rgb(hx)
 			# Compute how much this color contributes at each pixel
 			contribution = _compute_color_contribution(rgb, target_rgb, threshold=args.threshold, white_threshold=args.white_threshold)
-			# Dither the contribution to binary dots
-			mask = floyd_steinberg_dither(contribution) > 0
-			points = _extract_points_from_mask(mask, args.step_mm)
+			# Compute density map if variable dots enabled
+			density = compute_local_density(contribution, kernel_size=5) if args.variable_dots else None
+			# Apply selected dithering method
+			mask = dither(contribution, method=args.dither_method) > 0
+			points = _extract_points_from_mask(mask, args.step_mm, density=density)
 			layer_name = f"color_{pi+1}_{hx.lstrip('#')}"
 			layers.append((layer_name, hx, points, 0.5 * dot_mm))
 
@@ -173,4 +191,5 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> None:
 		order=args.order,
 		output_path=args.output,
 	)
-	print(f"Wrote {args.output}  ({cols}x{rows} grid, {sum(len(p) for _, _, p, _ in layers)} dots)")
+	total_dots = sum(len(p) for _, _, p, _ in layers)
+	print(f"Wrote {args.output}  ({cols}x{rows} grid, {total_dots} dots, method={args.dither_method}, variable_dots={args.variable_dots})")
