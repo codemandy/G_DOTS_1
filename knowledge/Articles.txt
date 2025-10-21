@@ -1,0 +1,9 @@
+https://usage.imagemagick.org/color_basics/
+
+https://en.wikipedia.org/wiki/Image_tracing
+
+https://en.wikipedia.org/wiki/Color_quantization
+
+https://surma.dev/things/ditherpunk/
+
+https://liamappelbe.medium.com/dizzy-dithering-2ae76dbceba1
